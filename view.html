@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Linear Programming — Simple Frontend</title>
+  <style>
+    :root{--accent:#2563eb;--muted:#6b7280}
+    body{font-family:Inter,ui-sans-serif,system-ui, -apple-system,"Segoe UI",Roboto,Ubuntu,'Helvetica Neue',Arial;margin:0;background:#f8fafc;color:#0f172a}
+    .container{max-width:1100px;margin:28px auto;padding:18px}
+    h1{font-size:20px;margin:0 0 10px}
+    .row{display:flex;gap:12px;align-items:center}
+    .card{background:#fff;border:1px solid #e6edf3;padding:12px;border-radius:8px;box-shadow:0 1px 2px rgba(12,20,30,0.03)}
+    label{font-size:13px;color:var(--muted)}
+    input[type=number], input[type=text], select{padding:8px;border-radius:6px;border:1px solid #e2e8f0;font-size:14px}
+    button{background:var(--accent);color:#fff;border:0;padding:8px 12px;border-radius:6px;cursor:pointer}
+    button.secondary{background:#fff;color:var(--accent);border:1px solid #c7defe}
+    .constraints{display:flex;flex-direction:column;gap:8px}
+    .constraint-row{display:flex;gap:6px;align-items:center}
+    .constraint-row input{width:88px}
+    .small{font-size:13px;color:var(--muted)}
+    canvas{background:#ffffff;border:1px solid #e6edf3;border-radius:6px}
+    pre{background:#0b1220;color:#e6eef8;padding:12px;border-radius:6px;overflow:auto}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    .footer{margin-top:8px;color:var(--muted);font-size:13px}
+    @media (max-width:900px){.row{flex-direction:column;align-items:stretch}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Linear Programming — HTML/CSS/JS frontend</h1>
+    <p class="small">Введите ограничения (a, b, c) для формулы <code>a·x + b·y ≤ c</code>, нажмите <strong>Plot & Solve</strong>. Рисунок показывает допустимую область и точки проверки.</p>
+
+    <div class="row" style="gap:18px;">
+      <div class="card" style="flex:0 0 420px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div>
+            <label>Objective function (Z = p·x + q·y)</label>
+            <div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+              <input id="p" type="number" value="1000" step="any" />
+              <span>x +</span>
+              <input id="q" type="number" value="2400" step="any" />
+              <span>y</span>
+              <select id="optType" style="margin-left:8px"><option value="min">Minimize</option><option value="max">Maximize</option></select>
+            </div>
+          </div>
+          <div>
+            <button id="loadExample">Load example</button>
+          </div>
+        </div>
+
+        <div>
+          <label>Constraints (a·x + b·y ≤ c)</label>
+          <div class="constraints" id="constraintsList" style="margin-top:8px">
+            <!-- rows inserted here -->
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button id="addConstraint" class="secondary">Add constraint</button>
+            <button id="solve" >Plot & Solve</button>
+            <button id="clear" class="secondary">Clear</button>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+          <div class="small">Precision: <input id="eps" type="number" value="1e-9" step="any" style="width:120px;margin-left:6px" /></div>
+          <div class="small">X range: <input id="xrange" type="text" value="-10,30" style="width:140px;margin-left:6px" /></div>
+          <div class="small">Y range: <input id="yrange" type="text" value="-10,30" style="width:140px;margin-left:6px" /></div>
+        </div>
+
+      </div>
+
+      <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:8px;">
+        <div class="card" style="padding:10px;">
+          <canvas id="plot" width="640" height="480"></canvas>
+        </div>
+
+        <div class="card" style="padding:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div class="small">Solution</div>
+              <div id="solutionText" style="font-weight:600;margin-top:6px">No result yet</div>
+            </div>
+            <div>
+              <button id="exportCSV" class="secondary">Export CSV</button>
+            </div>
+          </div>
+          <pre id="rawOutput" style="margin-top:8px;">{ }
+</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">Notes: This frontend computes intersection points of all pairs of lines, adds axis intercepts, filters feasible (a·x+b·y ≤ c and x,y ≥ 0) points, then evaluates objective. The feasible polygon is filled. Works for typical 2-variable LPs.</div>
+  </div>
+
+<script>
+// Utility functions
+function $(id){return document.getElementById(id)}
+
+function createConstraintRow(a=0,b=0,c=0){
+  const wrapper = document.createElement('div');
+  wrapper.className = 'constraint-row';
+  wrapper.innerHTML = `
+    <input type="number" step="any" class="a" value="${a}" />
+    <span style="font-size:14px">x +</span>
+    <input type="number" step="any" class="b" value="${b}" />
+    <span style="font-size:14px">y ≤</span>
+    <input type="number" step="any" class="c" value="${c}" />
+    <button class="remove">Remove</button>
+  `;
+  wrapper.querySelector('.remove').addEventListener('click',()=>{ wrapper.remove(); });
+  return wrapper;
+}
+
+function getConstraintsFromUI(){
+  const rows = Array.from(document.querySelectorAll('#constraintsList .constraint-row'));
+  return rows.map(r=>{
+    return [Number(r.querySelector('.a').value), Number(r.querySelector('.b').value), Number(r.querySelector('.c').value)];
+  });
+}
+
+function setConstraintsToUI(arr){
+  const list = $('constraintsList'); list.innerHTML='';
+  arr.forEach(t=> list.appendChild(createConstraintRow(t[0],t[1],t[2])));
+}
+
+// Math core (port of your python solver)
+function intersect(line1,line2){
+  const [a1,b1,c1]=line1; const [a2,b2,c2]=line2;
+  const D = a1*b2 - a2*b1;
+  if(Math.abs(D) < 1e-12) return null;
+  const x = (c1*b2 - c2*b1)/D;
+  const y = (a1*c2 - a2*c1)/D;
+  return [x,y];
+}
+
+function solveLP(constraints, objective, opts={eps:1e-9}){
+  const [p,q] = objective;
+  const points = [];
+  for(let i=0;i<constraints.length;i++){
+    for(let j=i+1;j<constraints.length;j++){
+      const pt = intersect(constraints[i], constraints[j]);
+      if(pt !== null) points.push(pt);
+    }
+  }
+  for(const [a,b,c] of constraints){
+    if(Math.abs(b) > 1e-12){ const y = c/b; if(y >= -opts.eps) points.push([0,y]); }
+    if(Math.abs(a) > 1e-12){ const x = c/a; if(x >= -opts.eps) points.push([x,0]); }
+  }
+  const validPoints = [];
+  for(const [x,y] of points){
+    if(x < -opts.eps || y < -opts.eps) continue;
+    let ok = true;
+    for(const [a,b,c] of constraints){ if(a*x + b*y > c + opts.eps){ ok = false; break; } }
+    if(ok) validPoints.push([Number(x), Number(y)]);
+  }
+  // Remove duplicates (within eps)
+  const uniq = [];
+  for(const pnt of validPoints){
+    if(!uniq.some(u=>Math.abs(u[0]-pnt[0])<1e-6 && Math.abs(u[1]-pnt[1])<1e-6)) uniq.push(pnt);
+  }
+  // If none, return infeasible
+  if(uniq.length === 0) return { status:'infeasible', valid_points: [], best_point:null, best_value:null };
+
+  // For objective choice: the UI has Min/Max — Python original minimized. We'll respect optType.
+  // We'll expose both min and max so caller can pick. Here compute min and max.
+  let bestMinVal = null, bestMinPt = null;
+  let bestMaxVal = null, bestMaxPt = null;
+  for(const [x,y] of uniq){
+    const Z = p*x + q*y;
+    if(bestMinVal === null || Z < bestMinVal){ bestMinVal = Z; bestMinPt = [x,y]; }
+    if(bestMaxVal === null || Z > bestMaxVal){ bestMaxVal = Z; bestMaxPt = [x,y]; }
+  }
+  return { status:'optimal', valid_points:uniq, best_min_point:bestMinPt, best_min_value:bestMinVal, best_max_point:bestMaxPt, best_max_value:bestMaxVal };
+}
+
+// Convex hull (Andrew monotone) for polygon drawing
+function convexHull(points){
+  if(points.length <= 1) return points.slice();
+  const pts = points.slice().sort((a,b)=> a[0]===b[0]?a[1]-b[1]:a[0]-b[0]);
+  const cross = (o,a,b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
+  const lower = [];
+  for(const p of pts){ while(lower.length>=2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop(); lower.push(p); }
+  const upper = [];
+  for(let i=pts.length-1;i>=0;i--){ const p=pts[i]; while(upper.length>=2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop(); upper.push(p); }
+  upper.pop(); lower.pop(); return lower.concat(upper);
+}
+
+// Drawing utilities
+function drawPlot(constraints, solution, opts={xrange:[-10,30], yrange:[-10,30]}){
+  const canvas = $('plot'); const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  const [xmin,xmax] = opts.xrange; const [ymin,ymax] = opts.yrange;
+  const sx = (x) => ( (x - xmin)/(xmax - xmin) ) * W;
+  const sy = (y) => H - ( (y - ymin)/(ymax - ymin) ) * H;
+
+  // grid
+  ctx.strokeStyle = '#eef2ff'; ctx.lineWidth = 1;
+  for(let x=Math.ceil(xmin); x<=Math.floor(xmax); x++){
+    const px = sx(x); ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,H); ctx.stroke();
+  }
+  for(let y=Math.ceil(ymin); y<=Math.floor(ymax); y++){
+    const py = sy(y); ctx.beginPath(); ctx.moveTo(0,py); ctx.lineTo(W,py); ctx.stroke();
+  }
+
+  // axes
+  ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1.5;
+  // x axis y=0
+  if(ymin <= 0 && ymax >= 0){ ctx.beginPath(); ctx.moveTo(0, sy(0)); ctx.lineTo(W, sy(0)); ctx.stroke(); }
+  // y axis x=0
+  if(xmin <= 0 && xmax >= 0){ ctx.beginPath(); ctx.moveTo(sx(0), 0); ctx.lineTo(sx(0), H); ctx.stroke(); }
+
+  // Draw each constraint line and half-plane lightly
+  constraints.forEach(([a,b,c], idx)=>{
+    // find two points on the visible canvas where line intersects bounding box
+    const linePts = [];
+    // x = xmin..xmax -> compute y
+    if(Math.abs(b) > 1e-12){
+      const y1 = (c - a*xmin)/b; const y2 = (c - a*xmax)/b;
+      linePts.push([xmin,y1],[xmax,y2]);
+    } else if(Math.abs(a) > 1e-12) {
+      // vertical line x = c/a
+      const x0 = c/a; linePts.push([x0, ymin],[x0, ymax]);
+    }
+    // clip to canvas
+    const pA = linePts[0]; const pB = linePts[1];
+    ctx.strokeStyle = '#c7d2fe'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sx(pA[0]), sy(pA[1])); ctx.lineTo(sx(pB[0]), sy(pB[1])); ctx.stroke();
+
+    // optionally shade feasible side: draw polygon covering canvas where a*x+b*y <= c
+    // We'll draw a large polygon that represents the half-plane intersection with bounding box
+    const corners = [[xmin,ymin],[xmax,ymin],[xmax,ymax],[xmin,ymax]];
+    const poly = [];
+    for(const corner of corners){ const [x,y]=corner; if(a*x + b*y <= c + 1e-9) poly.push(corner); }
+    // also add intersection points of the line with box edges
+    const edges = [ [ [xmin,ymin],[xmax,ymin] ], [ [xmax,ymin],[xmax,ymax] ], [ [xmax,ymax],[xmin,ymax] ], [ [xmin,ymax],[xmin,ymin] ] ];
+    edges.forEach(edge=>{
+      const L1 = [a,b,c];
+      // parametric edge: p = e0 + t*(e1-e0)
+      const [e0,e1]=edge;
+      // solve intersection between line and segment
+      // For segment param: x = e0x + t*(e1x-e0x), y similarly. Substitute into a*x+b*y=c -> solve t
+      const dx = e1[0]-e0[0]; const dy = e1[1]-e0[1];
+      const denom = a*dx + b*dy;
+      if(Math.abs(denom) > 1e-12){
+        const t = (c - a*e0[0] - b*e0[1]) / denom;
+        if(t>=-1e-9 && t<=1+1e-9){ const xi = e0[0]+t*dx; const yi = e0[1]+t*dy; poly.push([xi,yi]); }
+      }
+    });
+
+    if(poly.length >= 3){
+      const hull = convexHull(poly);
+      ctx.fillStyle = 'rgba(99,102,241,0.06)'; ctx.beginPath(); ctx.moveTo(sx(hull[0][0]), sy(hull[0][1])); for(let i=1;i<hull.length;i++) ctx.lineTo(sx(hull[i][0]), sy(hull[i][1])); ctx.closePath(); ctx.fill();
+    }
+  });
+
+  // draw feasible polygon based on solution.valid_points
+  if(solution && solution.valid_points && solution.valid_points.length>0){
+    const hull = convexHull(solution.valid_points);
+    if(hull.length >= 3){
+      ctx.fillStyle = 'rgba(16,185,129,0.12)'; ctx.beginPath(); ctx.moveTo(sx(hull[0][0]), sy(hull[0][1])); for(let i=1;i<hull.length;i++) ctx.lineTo(sx(hull[i][0]), sy(hull[i][1])); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(16,185,129,0.6)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(sx(hull[0][0]), sy(hull[0][1])); for(let i=1;i<hull.length;i++) ctx.lineTo(sx(hull[i][0]), sy(hull[i][1])); ctx.closePath(); ctx.stroke();
+    }
+
+    // draw all valid points
+    ctx.fillStyle = '#065f46';
+    solution.valid_points.forEach(([x,y])=>{ ctx.beginPath(); ctx.arc(sx(x), sy(y), 4, 0, Math.PI*2); ctx.fill(); });
+  }
+
+  // draw best point(s)
+  if(solution){
+    if(solution.best_min_point){ const [x,y] = solution.best_min_point; ctx.fillStyle='#c026d3'; ctx.beginPath(); ctx.arc(sx(x), sy(y),6,0,Math.PI*2); ctx.fill(); }
+    if(solution.best_max_point){ const [x,y] = solution.best_max_point; ctx.fillStyle='#ef4444'; ctx.beginPath(); ctx.arc(sx(x), sy(y),6,0,Math.PI*2); ctx.fill(); }
+  }
+
+  // labels
+  ctx.fillStyle='#0b1220'; ctx.font='12px Inter';
+  // ticks
+  for(let x=Math.ceil(xmin); x<=Math.floor(xmax); x++){ const px=sx(x); ctx.fillText(String(x), px+2, sy(0)-4); }
+  for(let y=Math.ceil(ymin); y<=Math.floor(ymax); y++){ const py=sy(y); ctx.fillText(String(y), sx(0)+4, py-2); }
+}
+
+// Wire up UI
+function parseRange(str, fallback){ try{ const parts=str.split(',').map(s=>Number(s.trim())); if(parts.length===2 && !isNaN(parts[0]) && !isNaN(parts[1])) return parts; }catch(e){} return fallback; }
+
+$('addConstraint').addEventListener('click', ()=> $('constraintsList').appendChild(createConstraintRow(0,0,0)) );
+$('loadExample').addEventListener('click', ()=>{ setConstraintsToUI([[1000,2400,12000],[-650,-500,-1600],[650,500,3200],[-500,1300,0]]); $('p').value=1000; $('q').value=2400; $('optType').value='min'; $('rawOutput').textContent=''; $('solutionText').textContent='No result yet'; });
+$('clear').addEventListener('click', ()=>{ setConstraintsToUI([]); $('rawOutput').textContent=''; $('solutionText').textContent='No result yet'; });
+$('solve').addEventListener('click', ()=>{
+  const constr = getConstraintsFromUI(); const p = Number($('p').value); const q = Number($('q').value);
+  const eps = Number($('eps').value) || 1e-9;
+  const xrange = parseRange($('xrange').value, [-10,30]); const yrange = parseRange($('yrange').value, [-10,30]);
+  const optType = $('optType').value;
+  const sol = solveLP(constr, [p,q], {eps});
+  if(sol.status === 'infeasible'){
+    $('rawOutput').textContent = JSON.stringify(sol, null, 2);
+    $('solutionText').textContent = 'Infeasible (no feasible points)';
+    drawPlot(constr, sol, {xrange, yrange});
+    return;
+  }
+  const output = { valid_points: sol.valid_points };
+  if(optType === 'min'){ output.best_point = sol.best_min_point; output.best_value = sol.best_min_value; }
+  else { output.best_point = sol.best_max_point; output.best_value = sol.best_max_value; }
+  $('rawOutput').textContent = JSON.stringify(output, null, 2);
+  $('solutionText').textContent = `Best: (${(output.best_point||['-','-'])[0]}, ${(output.best_point||['-','-'])[1]})  — value: ${output.best_value}`;
+  drawPlot(constr, sol, {xrange, yrange});
+});
+
+$('exportCSV').addEventListener('click', ()=>{
+  const text = $('rawOutput').textContent; if(!text) return alert('No result to export');
+  const obj = JSON.parse(text);
+  let csv = 'x,y\\n';
+  if(obj.valid_points){ obj.valid_points.forEach(p=> csv += `${p[0]},${p[1]}\\n`); }
+  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='valid_points.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+});
+
+// initialize with example
+setConstraintsToUI([[1000,2400,12000],[-650,-500,-1600],[650,500,3200],[-500,1300,0]]);
+$('optType').value='min';
+// initial draw
+$('solve').click();
+</script>
+</body>
+</html>
