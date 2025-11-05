@@ -296,14 +296,14 @@
     } catch(err){
       // fallback to local solver
       $('rawOutput').textContent = 'Server error: ' + err + '\\nUsing local solver...';
-      const local = solveLocal(constraints, [p,q], {eps:1e-9});
-      // pick best according to typ
-      const out = Object.assign({}, local);
-      if(typ === 'min'){ out.best_point = out.best_min_point; out.best_value = out.best_min_value; }
-      else { out.best_point = out.best_max_point; out.best_value = out.best_max_value; }
-      $('rawOutput').textContent = JSON.stringify(out, null, 2);
-      updateSolutionText(out, typ);
-      drawPlot(constraints, out, {xrange, yrange});
+      // const local = solveLocal(constraints, [p,q], {eps:1e-9});
+      // // pick best according to typ
+      // const out = Object.assign({}, local);
+      // if(typ === 'min'){ out.best_point = out.best_min_point; out.best_value = out.best_min_value; }
+      // else { out.best_point = out.best_max_point; out.best_value = out.best_max_value; }
+      // $('rawOutput').textContent = JSON.stringify(out, null, 2);
+      // updateSolutionText(out, typ);
+      // drawPlot(constraints, out, {xrange, yrange});
     }
   }
 
